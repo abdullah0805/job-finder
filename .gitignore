@@ -42,6 +42,9 @@ logs/
 chromedriver
 chromedriver.exe
 
+# Selenium
+geckodriver.log
+
 # OS specific
 .DS_Store
 Thumbs.db 
