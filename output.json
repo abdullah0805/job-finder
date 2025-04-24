@@ -1,0 +1,67 @@
+{
+  "relevant_jobs": [
+    {
+      "job_title": "Full Stack Developer - Python Flask Specialist",
+      "company": "Shaheen Developers",
+      "experience": "1 year of experience",
+      "jobNature": "Fulltime",
+      "location": "Sabzazar, PPB, PK",
+      "salary": "USD 503,039.0 - 636,960.0 per yearly",
+      "apply_link": "https://pk.indeed.com/viewjob?jk=ceee42564d3ec2bd"
+    },
+    {
+      "job_title": "Full Stack Developer with React Native Developer",
+      "company": "Artema Medical Group",
+      "experience": "2+ years",
+      "jobNature": "Fulltime, Contract",
+      "location": "Lahore, PPB, PK",
+      "salary": "USD 1,694,449.0 - 2,145,550.0 per yearly",
+      "apply_link": "https://pk.indeed.com/viewjob?jk=73faef2eb010c718"
+    },
+    {
+      "job_title": "Full Stack Developer",
+      "company": "DevBeings",
+      "experience": "1-2 years",
+      "jobNature": "Not specified",
+      "location": "Lahore , Pakistan",
+      "salary": "PKR 90,000 - 120,000",
+      "apply_link": "https://www.rozee.pk/dev-beings-llc-full-stack-developer-lahore-jobs-1593604?utm_source=jobSearch&utm_medium=website&utm_content=jobSearch_1593604&utm_campaign=ROZEE.PK_job_search"
+    },
+    {
+      "job_title": "Full Stack Developer",
+      "company": "Codfin",
+      "experience": "2-5 Years",
+      "jobNature": "Not specified",
+      "location": "Lahore , Pakistan",
+      "salary": "Not specified",
+      "apply_link": "https://www.rozee.pk/codfin-full-stack-developer-lahore-jobs-1591536?utm_source=jobSearch&utm_medium=website&utm_content=jobSearch_1591536&utm_campaign=ROZEE.PK_job_search"
+    },
+    {
+      "job_title": "Full Stack Developer - Angular / .NET",
+      "company": "EWS Pvt Ltd",
+      "experience": "4+ years",
+      "jobNature": "Not specified",
+      "location": "Lahore , Pakistan",
+      "salary": "Not specified",
+      "apply_link": "https://www.rozee.pk/ews-pvt-ltd-full-stack-developer-angular-net-lahore-jobs-1591518?utm_source=jobSearch&utm_medium=website&utm_content=jobSearch_1591518&utm_campaign=ROZEE.PK_job_search"
+    },
+    {
+      "job_title": "Full Stack Developer",
+      "company": "Braino Tech IT Solution GmbH",
+      "experience": "Proven experience",
+      "jobNature": "Not specified",
+      "location": "Lahore , Pakistan",
+      "salary": "Not specified",
+      "apply_link": "https://www.rozee.pk/braino-tech-it-solution-gmbh-full-stack-developer-lahore-jobs-1592146?utm_source=jobSearch&utm_medium=website&utm_content=jobSearch_1592146&utm_campaign=ROZEE.PK_job_search"
+    },
+    {
+      "job_title": "Full Stack Developer",
+      "company": "Ninja Net Sol",
+      "experience": "2-5 Years",
+      "jobNature": "Not specified",
+      "location": "Pakistan",
+      "salary": "Not specified",
+      "apply_link": "https://www.rozee.pk/ninja-net-sol-full-stack-developer-islamabad-karachi-lahore-rawalpindi-jobs-1587964?utm_source=jobSearch&utm_medium=website&utm_content=jobSearch_1587964&utm_campaign=ROZEE.PK_job_search"
+    }
+  ]
+}

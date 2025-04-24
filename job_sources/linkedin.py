@@ -6,9 +6,21 @@ from pydantic import BaseModel
 from jobspy import scrape_jobs
 import pandas as pd
 from datetime import datetime
+from config import JOBS_PER_SOURCE
+import json
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+# Configure LinkedIn-specific logging
+linkedin_logger = logging.getLogger('linkedin')
+linkedin_logger.setLevel(logging.INFO)
+linkedin_handler = logging.FileHandler('linkedin_raw.log')
+linkedin_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+linkedin_logger.addHandler(linkedin_handler)
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, pd.Timestamp)):
+            return obj.isoformat()
+        return super().default(obj)
 
 class JobSearchCriteria(BaseModel):
     position: str
@@ -28,7 +40,7 @@ async def fetch_linkedin_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any
     Returns:
         List of job listings from LinkedIn
     """
-    logger.info(f"Fetching LinkedIn jobs for position: {criteria.position} in {criteria.location}")
+    linkedin_logger.info(f"Fetching LinkedIn jobs for position: {criteria.position} in {criteria.location}")
     
     try:
         # Create job type filter based on criteria
@@ -43,6 +55,8 @@ async def fetch_linkedin_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any
         # Remote flag logic
         is_remote = "remote" in criteria.jobNature.lower()
         
+        linkedin_logger.info(f"LinkedIn search parameters: job_type={job_type}, is_remote={is_remote}")
+        
         # Execute in a separate thread pool to not block the async event loop
         loop = asyncio.get_event_loop()
         linkedin_jobs = await loop.run_in_executor(
@@ -51,7 +65,7 @@ async def fetch_linkedin_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any
                 site_name=["linkedin"],
                 search_term=criteria.position,
                 location=criteria.location,
-                results_wanted=15,  # Fetch 15 results
+                results_wanted=JOBS_PER_SOURCE,  # Limit to configured number of jobs
                 hours_old=72,       # Recent jobs only
                 job_type=job_type,
                 is_remote=is_remote,
@@ -60,6 +74,10 @@ async def fetch_linkedin_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any
                 verbose=0
             )
         )
+        
+        # Log raw LinkedIn response
+        linkedin_logger.info("Raw LinkedIn Response:")
+        linkedin_logger.info(json.dumps(linkedin_jobs.to_dict(orient='records'), indent=2, cls=DateTimeEncoder))
         
         # Convert to list of dictionaries
         if isinstance(linkedin_jobs, pd.DataFrame):
@@ -108,12 +126,12 @@ async def fetch_linkedin_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any
                 }
                 jobs_list.append(job_obj)
                 
-            logger.info(f"Successfully fetched {len(jobs_list)} jobs from LinkedIn")
+            linkedin_logger.info(f"Successfully processed {len(jobs_list)} jobs from LinkedIn")
             return jobs_list
         
-        logger.warning("LinkedIn returned no jobs or invalid format")
+        linkedin_logger.warning("LinkedIn returned no jobs or invalid format")
         return []
         
     except Exception as e:
-        logger.error(f"Error fetching LinkedIn jobs: {str(e)}")
+        linkedin_logger.error(f"Error fetching LinkedIn jobs: {str(e)}")
         return []  # Return empty list on error

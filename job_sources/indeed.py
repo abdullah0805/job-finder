@@ -6,9 +6,27 @@ from pydantic import BaseModel
 from jobspy import scrape_jobs
 import pandas as pd
 from datetime import datetime
+from config import JOBS_PER_SOURCE
+import json
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+# Configure Indeed-specific logging
+indeed_logger = logging.getLogger('indeed')
+indeed_logger.setLevel(logging.INFO)
+indeed_handler = logging.FileHandler('indeed_raw.log')
+indeed_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+indeed_logger.addHandler(indeed_handler)
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, pd.Timestamp)):
+            return obj.isoformat()
+        return super().default(obj)
+
+def convert_dataframe_to_dict(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """
+    Convert DataFrame to list of dictionaries using default=str for JSON serialization
+    """
+    return df.to_dict(orient='records')
 
 class JobSearchCriteria(BaseModel):
     position: str
@@ -28,7 +46,7 @@ async def fetch_indeed_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any]]
     Returns:
         List of job listings from Indeed
     """
-    logger.info(f"Fetching Indeed jobs for position: {criteria.position} in {criteria.location}")
+    indeed_logger.info(f"Fetching Indeed jobs for position: {criteria.position} in {criteria.location}")
     
     try:
         # Create job type filter based on criteria
@@ -43,6 +61,8 @@ async def fetch_indeed_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any]]
         # Remote flag logic
         is_remote = "remote" in criteria.jobNature.lower()
         
+        indeed_logger.info(f"Indeed search parameters: job_type={job_type}, is_remote={is_remote}")
+        
         # Execute in a separate thread pool to not block the async event loop
         loop = asyncio.get_event_loop()
         indeed_jobs = await loop.run_in_executor(
@@ -51,7 +71,7 @@ async def fetch_indeed_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any]]
                 site_name=["indeed"],
                 search_term=criteria.position,
                 location=criteria.location,
-                results_wanted=15,  # Fetch 15 results
+                results_wanted=JOBS_PER_SOURCE,  # Limit to configured number of jobs
                 hours_old=72,       # Recent jobs only
                 job_type=job_type,
                 is_remote=is_remote,
@@ -60,6 +80,16 @@ async def fetch_indeed_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any]]
                 verbose=0
             )
         )
+        
+        # Log raw Indeed response
+        indeed_logger.info("Raw Indeed Response:")
+        if isinstance(indeed_jobs, pd.DataFrame):
+            # Convert DataFrame to list of dictionaries
+            indeed_records = convert_dataframe_to_dict(indeed_jobs)
+            # Use default=str to handle any non-serializable objects
+            indeed_logger.info(json.dumps(indeed_records, indent=2, default=str))
+        else:
+            indeed_logger.warning("Indeed returned no jobs or invalid format")
         
         # Convert to list of dictionaries
         if isinstance(indeed_jobs, pd.DataFrame):
@@ -84,11 +114,6 @@ async def fetch_indeed_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any]]
                 if job_nature and str(job_nature) != 'nan':
                     job_nature = str(job_nature).title()
                 
-                # Format date to string
-                posted_date = job.get('date_posted', '')
-                if isinstance(posted_date, (pd.Timestamp, datetime)):
-                    posted_date = posted_date.strftime('%Y-%m-%d')
-                
                 # Create standardized job object
                 job_obj = {
                     "job_title": job.get('title', 'Unknown Title'),
@@ -104,18 +129,18 @@ async def fetch_indeed_jobs(criteria: JobSearchCriteria) -> List[Dict[str, Any]]
                     "company_description": job.get('company_description', ''),
                     "company_rating": job.get('company_rating', ''),
                     "company_reviews": job.get('company_reviews', ''),
-                    "posted_date": posted_date
+                    "date_posted": job.get('date_posted', '')
                 }
                 jobs_list.append(job_obj)
                 
-            logger.info(f"Successfully fetched {len(jobs_list)} jobs from Indeed")
+            indeed_logger.info(f"Successfully processed {len(jobs_list)} jobs from Indeed")
             return jobs_list
         
-        logger.warning("Indeed returned no jobs or invalid format")
+        indeed_logger.warning("Indeed returned no jobs or invalid format")
         return []
         
     except Exception as e:
-        logger.error(f"Error fetching Indeed jobs: {str(e)}")
+        indeed_logger.error(f"Error fetching Indeed jobs: {str(e)}")
         return []  # Return empty list on error
 
 def extract_experience_from_description(description: str) -> str:

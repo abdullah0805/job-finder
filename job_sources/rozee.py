@@ -13,12 +13,22 @@ from urllib.parse import quote
 import traceback
 import re
 from concurrent.futures import ThreadPoolExecutor
+import logging
+from config import JOBS_PER_SOURCE
+import json
+
+# Configure Rozee-specific logging
+rozee_logger = logging.getLogger('rozee')
+rozee_logger.setLevel(logging.INFO)
+rozee_handler = logging.FileHandler('rozee_raw.log')
+rozee_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+rozee_logger.addHandler(rozee_handler)
 
 async def fetch_rozee_jobs(criteria):
     """
     Fetch jobs from Rozee.pk using Selenium for web scraping, including details.
     """
-    print(f"Fetching Rozee.pk jobs for {criteria.position} in {criteria.location}")
+    rozee_logger.info(f"Fetching Rozee.pk jobs for {criteria.position} in {criteria.location}")
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _fetch_rozee_jobs_sync, criteria)
 
@@ -64,16 +74,16 @@ def _fetch_rozee_jobs_sync(criteria):
         city = criteria.location.split(',')[0].strip()
         position_query = quote(criteria.position)
         rozee_url = f"https://www.rozee.pk/job/jsearch/q/{position_query}"
-        print(f"Navigating to Rozee.pk URL: {rozee_url}")
+        rozee_logger.info(f"Navigating to Rozee.pk URL: {rozee_url}")
         driver.get(rozee_url)
 
         try:
             select_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select.form-control.w-100")))
             select = Select(select_element)
-            print(f"Selecting city: {city}")
+            rozee_logger.info(f"Selecting city: {city}")
             select.select_by_visible_text(city)
         except Exception as city_select_error:
-            print(f"Could not select city '{city}'. Error: {city_select_error}. Proceeding without city filter.")
+            rozee_logger.warning(f"Could not select city '{city}'. Error: {city_select_error}. Proceeding without city filter.")
 
         # Wait for job list to load
         wait_selector = "div#jobs > div.job div.jhead div.jobt h3.s-18 a"
@@ -82,40 +92,35 @@ def _fetch_rozee_jobs_sync(criteria):
         # Find job cards
         card_selector = "div#jobs > div.job"
         job_cards = driver.find_elements(By.CSS_SELECTOR, card_selector)
-        print(f"Found {len(job_cards)} potential job cards.")
+        rozee_logger.info(f"Found {len(job_cards)} potential job cards.")
 
         jobs = []
         processed_urls = set()
 
-        # Process cards in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = []
-            for i in range(min(len(job_cards), 10)):
-                futures.append(executor.submit(process_job_card, driver, job_cards[i], i, criteria, processed_urls))
-            
-            for future in futures:
-                try:
-                    job = future.result()
-                    if job:
-                        jobs.append(job)
-                except Exception as e:
-                    print(f"Error processing job card: {str(e)}")
+        # Process only the configured number of cards
+        for i in range(min(len(job_cards), JOBS_PER_SOURCE)):
+            try:
+                job = process_job_card(driver, job_cards[i], i, criteria, processed_urls)
+                if job:
+                    jobs.append(job)
+            except Exception as e:
+                rozee_logger.error(f"Error processing job card {i + 1}: {str(e)}")
+                continue
 
-        print(f"\nFinished processing. Found {len(jobs)} valid Rozee.pk jobs with details.")
+        # Log raw Rozee jobs
+        rozee_logger.info("Raw Rozee Jobs:")
+        rozee_logger.info(json.dumps(jobs, indent=2))
+
+        rozee_logger.info(f"Finished processing. Found {len(jobs)} valid Rozee.pk jobs with details.")
         return jobs
 
     except Exception as e:
-        print("-" * 30)
-        print(f"!!! MAJOR ERROR during Rozee.pk job fetch !!!")
-        print(f"Exception Type: {type(e).__name__}")
-        print(f"Error Message: {str(e)}")
-        print("Full Traceback:")
-        traceback.print_exc()
-        print("-" * 30)
+        rozee_logger.error(f"MAJOR ERROR during Rozee.pk job fetch: {str(e)}")
+        rozee_logger.error("Full Traceback:", exc_info=True)
         return []
 
     finally:
-        print("Closing Rozee.pk WebDriver.")
+        rozee_logger.info("Closing Rozee.pk WebDriver.")
         if 'driver' in locals() and driver:
             driver.quit()
 
@@ -158,7 +163,7 @@ def process_job_card(driver, card, index, criteria, processed_urls):
         click_target.click()
         processed_urls.add(job_link)
 
-        # Extract complete job details
+        # Wait for job details to load
         wait = WebDriverWait(driver, 5)
         detail_container = wait.until(EC.visibility_of_element_located((By.ID, "job-content")))
         
@@ -180,11 +185,35 @@ def process_job_card(driver, card, index, criteria, processed_urls):
         except NoSuchElementException:
             pass
 
+        # Extract structured job details
+        job_details = {}
         try:
-            # Get all job details
-            details_section = detail_container.find_element(By.XPATH, ".//h4[text()=' Job Details']/following-sibling::div[contains(@class, 'jcnt')]")
+            # Find the job details section using the correct class
+            details_section = detail_container.find_element(By.CSS_SELECTOR, "div.jblk h4.nrs-18 + div.jcnt.jobd")
             if details_section:
-                full_details += "Job Details:\n" + details_section.text.strip()
+                # Find all rows in the details section
+                rows = details_section.find_elements(By.CSS_SELECTOR, "div.row")
+                for row in rows:
+                    try:
+                        # Get the label (first column)
+                        label_elem = row.find_element(By.CSS_SELECTOR, "div.col-lg-3")
+                        label = label_elem.text.strip().rstrip(':')
+                        
+                        # Get the value (second column)
+                        value_elem = row.find_element(By.CSS_SELECTOR, "div.col-lg-7")
+                        # Get text from all elements in the value column
+                        value_parts = []
+                        for elem in value_elem.find_elements(By.CSS_SELECTOR, "*"):
+                            if elem.tag_name == "a":
+                                value_parts.append(elem.text.strip())
+                            else:
+                                value_parts.append(elem.text.strip())
+                        value = " ".join(filter(None, value_parts))
+                        
+                        # Store in job_details
+                        job_details[label] = value
+                    except NoSuchElementException:
+                        continue
         except NoSuchElementException:
             pass
 
@@ -206,11 +235,24 @@ def process_job_card(driver, card, index, criteria, processed_urls):
             "apply_button_present": apply_button_found,
             "source": "Rozee.pk",
             "description_snippet": card.find_element(By.CSS_SELECTOR, "div.jbody bdi").text.strip(),
-            "full_details": full_details
+            "full_details": full_details,
+            # Add structured job details
+            "industry": job_details.get("Industry", "Not specified"),
+            "functional_area": job_details.get("Functional Area", "Not specified"),
+            "total_positions": job_details.get("Total Positions", "Not specified"),
+            "job_shift": job_details.get("Job Shift", "Not specified"),
+            "job_type": job_details.get("Job Type", "Not specified"),
+            "gender": job_details.get("Gender", "Not specified"),
+            "minimum_education": job_details.get("Minimum Education", "Not specified"),
+            "career_level": job_details.get("Career Level", "Not specified"),
+            "experience": job_details.get("Experience", "Not specified"),
+            "apply_before": job_details.get("Apply Before", "Not specified"),
+            "posting_date": job_details.get("Posting Date", "Not specified")
         }
 
+        rozee_logger.info(f"Successfully processed job card {index + 1}: {job_title}")
         return job
 
     except Exception as e:
-        print(f"Error processing card {index + 1}: {str(e)}")
+        rozee_logger.error(f"Error processing card {index + 1}: {str(e)}")
         return None

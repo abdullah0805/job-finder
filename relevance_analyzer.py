@@ -2,6 +2,8 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from typing import List, Dict, Any
 import os
+import json
+import logging
 
 # Load environment variables
 load_dotenv()
@@ -9,6 +11,8 @@ load_dotenv()
 # Initialize Gemini with API key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
+
+logger = logging.getLogger(__name__)
 
 def test_gemini_api():
     """
@@ -86,13 +90,10 @@ def analyze_job_relevance(jobs: List[Dict[str, Any]], criteria):
             
             # Filter out jobs with very low relevance
             if final_relevance >= 0.3:  # Lowered threshold to include more jobs
-                # Remove description from final output to keep response clean
-                if "description" in job:
-                    del job["description"]
-                if "full_details" in job:
-                    del job["full_details"]
-                relevant_jobs.append(job)
-                print(f"Added job {job.get('job_title', 'Unknown')} to relevant jobs")
+                # Standardize job format and fill missing fields using LLM
+                standardized_job = standardize_job_format(job, criteria)
+                relevant_jobs.append(standardized_job)
+                print(f"Added job {standardized_job['job_title']} to relevant jobs")
             else:
                 print(f"Job {job.get('job_title', 'Unknown')} filtered out due to low relevance")
                 
@@ -183,14 +184,17 @@ def analyze_with_llm(job, criteria):
         if source == 'rozee.pk':
             job_details.update({
                 "full_details": job.get('full_details', ''),
-                "skills": job.get('skills', []),
-                "education": job.get('education', ''),
-                "career_level": job.get('career_level', ''),
                 "industry": job.get('industry', ''),
                 "functional_area": job.get('functional_area', ''),
                 "total_positions": job.get('total_positions', ''),
+                "job_shift": job.get('job_shift', ''),
+                "job_type": job.get('job_type', ''),
+                "gender": job.get('gender', ''),
+                "minimum_education": job.get('minimum_education', ''),
+                "career_level": job.get('career_level', ''),
+                "experience": job.get('experience', ''),
                 "apply_before": job.get('apply_before', ''),
-                "posted_date": job.get('posted_date', '')
+                "posting_date": job.get('posting_date', '')
             })
         elif source == 'indeed':
             # Indeed specific fields
@@ -243,14 +247,17 @@ def analyze_with_llm(job, criteria):
         if source == 'rozee.pk':
             prompt += f"""
             ADDITIONAL DETAILS (Rozee):
-            - Education: {job_details['education']}
-            - Career Level: {job_details['career_level']}
             - Industry: {job_details['industry']}
             - Functional Area: {job_details['functional_area']}
             - Total Positions: {job_details['total_positions']}
+            - Job Shift: {job_details['job_shift']}
+            - Job Type: {job_details['job_type']}
+            - Gender: {job_details['gender']}
+            - Minimum Education: {job_details['minimum_education']}
+            - Career Level: {job_details['career_level']}
+            - Experience: {job_details['experience']}
             - Apply Before: {job_details['apply_before']}
-            - Posted Date: {job_details['posted_date']}
-            - Skills Required: {', '.join(job_details['skills']) if isinstance(job_details['skills'], list) else job_details['skills']}
+            - Posted Date: {job_details['posting_date']}
             - Full Details: {job_details['full_details']}
             """
         elif source == 'indeed':
@@ -300,9 +307,115 @@ def analyze_with_llm(job, criteria):
             relevance_score = float(result)
             return max(0.0, min(1.0, relevance_score))
         except ValueError:
-            print(f"Failed to parse Gemini relevance score: {result}")
+            logger.error(f"Failed to parse Gemini relevance score: {result}")
             return 0.5
 
     except Exception as e:
-        print(f"Error in Gemini relevance analysis: {str(e)}")
+        logger.error(f"Error in Gemini relevance analysis: {str(e)}")
         return 0.5
+
+def standardize_job_format(job: Dict[str, Any], criteria) -> Dict[str, Any]:
+    """
+    Standardize job format and fill missing fields using LLM
+    """
+    # Initialize standardized job with required fields
+    standardized_job = {
+        "job_title": job.get("job_title", ""),
+        "company": job.get("company", ""),
+        "experience": job.get("experience", ""),
+        "jobNature": job.get("jobNature", ""),
+        "location": job.get("location", ""),
+        "salary": job.get("salary", ""),
+        "apply_link": job.get("apply_link", ""),
+        "relevance_score": job.get("relevance_score", 0.0)
+    }
+    
+    # Check for missing or unspecified fields
+    missing_fields = [field for field, value in standardized_job.items() 
+                     if not value or value == "Not specified" or value == "N/A" or value == "Not Specified"]
+    
+    if missing_fields:
+        logger.info(f"Missing fields for job {job.get('job_title', 'Unknown')}: {missing_fields}")
+        # Use LLM to fill missing fields
+        filled_fields = fill_missing_fields_with_llm(job, missing_fields)
+        standardized_job.update(filled_fields)
+        logger.info(f"Filled missing fields: {filled_fields}")
+    
+    return standardized_job
+
+def fill_missing_fields_with_llm(job: Dict[str, Any], missing_fields: List[str]) -> Dict[str, Any]:
+    """
+    Use LLM to fill missing fields based on job description and details
+    """
+    try:
+        # Prepare job details for LLM
+        job_details = {
+            "title": job.get("job_title", ""),
+            "company": job.get("company", ""),
+            "description": job.get("description", ""),
+            "full_details": job.get("full_details", ""),
+            "source": job.get("source", ""),
+            "job_type": job.get("job_type", ""),
+            "employment_type": job.get("employment_type", ""),
+            "seniority_level": job.get("seniority_level", ""),
+            "location": job.get("location", ""),
+            "salary": job.get("salary", ""),
+            "experience": job.get("experience", ""),
+            "skills": job.get("skills", []),
+            "posted_date": job.get("posted_date", ""),
+            # Add Rozee-specific fields
+            "industry": job.get("industry", ""),
+            "functional_area": job.get("functional_area", ""),
+            "total_positions": job.get("total_positions", ""),
+            "job_shift": job.get("job_shift", ""),
+            "gender": job.get("gender", ""),
+            "minimum_education": job.get("minimum_education", ""),
+            "career_level": job.get("career_level", ""),
+            "apply_before": job.get("apply_before", "")
+        }
+        
+        # Build prompt for LLM
+        prompt = f"""
+        Based on the following job details, fill in the missing fields: {', '.join(missing_fields)}.
+        Only output the missing fields in JSON format.
+        
+        Job Details:
+        {json.dumps(job_details, indent=2)}
+        
+        For each missing field, provide the most accurate information based on the available details.
+        If information cannot be determined, use "Not specified".
+        
+        Guidelines for each field:
+        - job_title: Extract from title or description if missing
+        - company: Extract from company name or description
+        - experience: Look for phrases like "X years experience" or "entry level"
+        - jobNature: Look for terms like "onsite", "remote", "hybrid"
+        - location: Extract from location field or description
+        - salary: Look for salary ranges or compensation information
+        - apply_link: Use the job URL if available
+        
+        Output format should be a JSON object with only the missing fields.
+        Do not include any markdown formatting or code blocks.
+        """
+        
+        # Call Gemini API
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        response = model.generate_content(prompt)
+        result = response.text.strip()
+        
+        # Clean the response to remove any markdown formatting
+        result = result.replace("```json", "").replace("```", "").strip()
+        
+        # Parse LLM response
+        try:
+            filled_fields = json.loads(result)
+            logger.info(f"Successfully filled fields: {filled_fields}")
+            return filled_fields
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response: {result}")
+            logger.error(f"JSON decode error: {str(e)}")
+            return {field: "Not specified" for field in missing_fields}
+            
+    except Exception as e:
+        logger.error(f"Error filling missing fields with LLM: {str(e)}")
+        return {field: "Not specified" for field in missing_fields}

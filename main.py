@@ -19,7 +19,11 @@ from relevance_analyzer import analyze_job_relevance
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('job_finder.log'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,6 @@ class JobListing(BaseModel):
     location: str
     salary: str
     apply_link: str
-    source: str
     relevance_score: Optional[float] = None
 
 class JobSearchResponse(BaseModel):
@@ -90,21 +93,25 @@ async def search_jobs(criteria: JobSearchCriteria, background_tasks: BackgroundT
         # Handle potential errors from job sources
         all_jobs = []
         if not isinstance(indeed_jobs, Exception):
+            logger.info(f"Successfully fetched {len(indeed_jobs)} jobs from Indeed")
             all_jobs.extend(indeed_jobs)
         else:
             logger.error(f"Error fetching Indeed jobs: {str(indeed_jobs)}")
             
         if not isinstance(rozee_jobs, Exception):
+            logger.info(f"Successfully fetched {len(rozee_jobs)} jobs from Rozee")
             all_jobs.extend(rozee_jobs)
         else:
             logger.error(f"Error fetching Rozee jobs: {str(rozee_jobs)}")
             
         if not isinstance(linkedin_jobs, Exception):
+            logger.info(f"Successfully fetched {len(linkedin_jobs)} jobs from LinkedIn")
             all_jobs.extend(linkedin_jobs)
         else:
             logger.error(f"Error fetching LinkedIn jobs: {str(linkedin_jobs)}")
             
         if not all_jobs:
+            logger.warning("No jobs found matching criteria")
             raise HTTPException(status_code=404, detail="No jobs found matching your criteria")
         
         # Analyze job relevance
@@ -130,6 +137,7 @@ async def search_jobs(criteria: JobSearchCriteria, background_tasks: BackgroundT
         # Start background task to refresh cache
         background_tasks.add_task(refresh_job_cache, criteria)
         
+        logger.info(f"Successfully completed job search. Found {len(relevant_jobs)} relevant jobs")
         return response
         
     except Exception as e:
@@ -150,6 +158,7 @@ async def refresh_job_cache(criteria: JobSearchCriteria):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    logger.info("Health check requested")
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -157,4 +166,5 @@ async def health_check():
     }
 
 if __name__ == "__main__":
+    logger.info("Starting Job Finder API server")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
